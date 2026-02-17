@@ -1,12 +1,14 @@
+import {SHAPES, COLORS} from './resources.js'
 /** @type {HTMLCanvasElement} */
 const canvas = document.getElementById("main");
 
 /** @type {CanvasRenderingContext2D} */
 const ctx = canvas.getContext("2d");
 
-class Block {
-  constructor(color) {
+class Cell {
+  constructor(color, opacity = 1) {
     this.color = color;
+    this.opacity = opacity;
 
     this.canvas = document.createElement('canvas');
     this.canvas.width = CELLSIZE;
@@ -20,7 +22,32 @@ class Block {
 
   /** @param {CanvasRenderingContext2D} ctx*/ 
   render(ctx, x, y) {
-    ctx.drawImage(this.canvas, x, y)
+    ctx.globalAlpha = this.opacity;
+    ctx.drawImage(this.canvas, x, y);
+    ctx.globalAlpha = 1;
+  }
+}
+
+class Block {
+  constructor(shape, color, opacity = 1) {
+    this.canvas = document.createElement('canvas');
+    this.ctx = this.canvas.getContext('2d');
+    this.shape = shape;
+    this.color = color;
+    this.opacity = opacity;
+    this.cell = new Cell(this.color, this.opacity);
+
+    this.canvas.width = 5 * CELLSIZE;
+    this.canvas.height = 5 * CELLSIZE;
+
+    for(let {x, y} of this.shape) {
+      this.cell.render(this.ctx, (x+2) * CELLSIZE, (y+2) * CELLSIZE);
+    }
+  }
+
+  /** @param {CanvasRenderingContext2D} ctx*/ 
+  render(ctx, x, y, w = this.canvas.width, h = this.canvas.height) {
+    ctx.drawImage(this.canvas, x, y, w, h);
   }
 }
 
@@ -32,6 +59,9 @@ class Grid {
     this.lineWidth = lineWidth;
     this.numberX = numberX;
     this.numberY = numberY;
+
+
+    this.array = Array(this.numberY).fill().map(() => Array(this.numberX).fill());
 
     this.canvas.width = CELLSIZE * this.numberX;
     this.canvas.height = CELLSIZE * this.numberY;
@@ -66,6 +96,8 @@ class Spawner {
     this.color = color;
     this.lineWidth = lineWidth;
 
+    this.respawn()
+
     this.canvas.width = width;
     this.canvas.height = height;
 
@@ -73,66 +105,72 @@ class Spawner {
     this.ctx.lineWidth = this.lineWidth;
 
     this.ctx.strokeRect(0, 0, this.canvas.width, this.canvas.height);
+
+   for(let i = 0; i < this.blockList.length; i++) {
+     const blockSizeRatio = 0.5;
+     this.ctx.drawImage(
+       this.blockList[i].canvas,
+       i * this.canvas.width / this.blockList.length + this.canvas.width / this.blockList.length / 2 - this.blockList[i].canvas.width * blockSizeRatio / 2,
+       this.canvas.height / 2 - this.blockList[i].canvas.height * blockSizeRatio / 2,
+       this.blockList[i].canvas.width * blockSizeRatio,
+       this.blockList[i].canvas.height * blockSizeRatio
+     );
+   }
   }
 
   /** @param {CanvasRenderingContext2D} ctx*/ 
   render(ctx, x, y) {
     ctx.drawImage(this.canvas, x, y);
   }
-}
 
-class MouseGrid {
-  constructor(offsetX, offsetY, size) {
-    this.canvas = document.createElement('canvas');
-    this.ctx = this.canvas.getContext('2d');
-    this.offsetX = offsetX;
-    this.offsetY = offsetY;
-    this.size = size;
-
-    this.canvas.width = this.size * CELLSIZE;
-    this.canvas.height = this.size * CELLSIZE;
-
-    this.ctx.strokeStyle = 'grey';
-    this.ctx.lineWidth = 2;
-
-    this.ctx.strokeRect(0, 0, this.canvas.width, this.canvas.height);
-  }
-  /** @type {CanvasRenderingContext2D} */
-  render(ctx, x, y) {
-    ctx.drawImage(this.canvas, x, y);
+  respawn() {
+    /**@type {Block[]}*/
+    this.blockList = Array(3).fill().map(() => {
+        return new Block(
+        SHAPES[Math.floor(Math.random() * SHAPES.length)], COLORS[Math.floor(Math.random() * COLORS.length)]
+      )
+    });
   }
 }
 
 const CELLSIZE = 50;
 
-const SHAPE = [
-  [
-    {x:0, y:0},
-    {x:1, y:1},
-  ]
-]
+class Mouse {
+  constructor(offsetX, offsetY) {
+    this.x = 0;
+    this.y = 0;
+    //this.isClick = false;
+    this.isPointerInGrid = false;
+    this.isInSpawner = false;
+    this.isGrabbed = 0;
+    this.gridPosX = 0;
+    this.gridPosY = 0;
 
-/** @type {{[key: string]: Block}}*/
-const BLOCKS = {
-  '1': new Block('red'),
-  '2': new Block('orange'),
-  '3': new Block('yellow'),
-  '4': new Block('green'),
-  '5': new Block('blue'),
-  '6': new Block('navy'),
-  '7': new Block('purple'),
-  '8': new Block('pink'),
-  '9': new Block('cyan')
-};
+    this.pointerX = 0;
+    this.pointerY = 0;
 
+    this.offsetX = offsetX;
+    this.offsetY = offsetY;
 
-const MOUSE = {
-  x: 0,
-  y: 0,
-  isClick: false,
-  isInGrid: false,
-  isInSpawner: false
-};
+    this.canvas = document.createElement('canvas');
+    this.ctx = this.canvas.getContext('2d')
+    this.canvas.width = 5 * CELLSIZE;
+    this.canvas.height = 5 * CELLSIZE
+    this.ctx.strokeStyle = 'grey';
+    this.ctx.lineWidth = 2
+    this.ctx.strokeRect(0, 0, this.canvas.width, this.canvas.height)
+
+    this.grabbedBlockIdx = undefined;
+    this.isGrabbed = false;
+  }
+
+  isCollision(cx, cy, x, y, w, h) {
+    return cx > x && cx < x + w && cy > y && cy < y + h;
+  }
+  render(ctx, x, y) {
+    ctx.drawImage(this.canvas, x, y)
+  }
+}
 
 
 
@@ -142,49 +180,64 @@ function render() {
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   //draw grid
-  const gridStartX = canvas.width / 2 - grid.canvas.width / 2;
-  const gridStartY = canvas.height / 2 - grid.canvas.height / 2 - 100;
+  gridStartX = canvas.width / 2 - grid.canvas.width / 2;
+  gridStartY = canvas.height / 2 - grid.canvas.height / 2 - 100;
   grid.render(ctx, gridStartX, gridStartY);
 
   // draw block spawn section
-  const spawnerStartX = gridStartX;
-  const spawnerStartY = gridStartY + grid.canvas.height + 20;
+  spawnerStartX = gridStartX;
+  spawnerStartY = gridStartY + grid.canvas.height + 20;
   spawner.render(ctx, spawnerStartX, spawnerStartY)
 
-  //draw mouseGrid
-  if(MOUSE.isClick) {
-    mouseGrid.render(ctx, MOUSE.x + mouseGrid.offsetX - mouseGrid.canvas.width / 2, MOUSE.y + mouseGrid.offsetY - mouseGrid.canvas.height / 2)
+  //draw mouse canvas
+  if(mouse.isGrabbed) {
+    spawner.blockList[mouse.grabbedBlockIdx].render(
+      ctx, mouse.pointerX - spawner.blockList[mouse.grabbedBlockIdx].canvas.width / 2,
+      mouse.pointerY - spawner.blockList[mouse.grabbedBlockIdx].canvas.height / 2);
+    //mouse.render(ctx, mouse.x + mouse.offsetX - mouse.canvas.width / 2, mouse.y + mouse.offsetY - mouse.canvas.height / 2)
   }
+  
+  ctx.strokeStyle = 'grey';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(mouse.pointerX, mouse.pointerY, 5, 0, Math.PI * 2);
+  ctx.stroke();
 
-
-  // fill block color
-  for(let y = 0; y < gridArray.length; y++) {
-    for(let x = 0; x < gridArray[y].length; x++) {
-      if(gridArray[y][x]) {
-       //BLOCKS[gridArray[y][x]].render(ctx, gridStartX + x * CELLSIZE, gridStartY + y * CELLSIZE);
-      }
-    }
-  }
+  //draw grid cells
 }
 
 
 
 function update(interval) {
-  //console.log(`x: ${MOUSE.x}, y: ${MOUSE.y}, isClick: ${MOUSE.isClick}, isInGrid: ${MOUSE.isInGrid}, isInSpawner: ${MOUSE.isInSpawner}`)
+  //console.log(`x: ${mouse.x}, y: ${mouse.y}, isClick: ${mouse.isClick}, isPointerInGrid: ${mouse.isPointerInGrid}, isInSpawner: ${mouse.isInSpawner}, isGrabbed: ${mouse.isGrabbed}`)
+  // check grid block collision
+
+  if(mouse.isPointerInGrid) {
+    mouse.gridPosX = Math.floor((mouse.pointerX - gridStartX) / CELLSIZE);
+    mouse.gridPosY = Math.floor((mouse.pointerY - gridStartY) / CELLSIZE);
+    if(mouse.isGrabbed){
+      for(let pos of spawner.blockList[mouse.grabbedBlockIdx].shape){
+      }
+    } 
+  }
+  console.log(mouse.gridPosX, mouse.gridPosY);
 }
+  
+
+
 
 
 let firstTime = 0;
+let gridStartX, gridStartY, spawnerStartX, spawnerStartY;
 
 const grid = new Grid('grey', 2, 10, 10);
 const spawner = new Spawner('grey', 6, grid.canvas.width, 200);
-const mouseGrid = new MouseGrid(-150, -300, 5);
+const mouse = new Mouse(-100, -150);
 
-const gridArray = Array(grid.numberY).fill().map(
-  () => Array(10).fill().map(() => Math.floor(Math.random()*8))
-);
-
-
+const cellCache = {};
+COLORS.forEach((color) => {
+  cellCache[color] = new Cell(color);
+})
 
 function main(timeStamp) {
   const interval = (timeStamp - firstTime) / 1000;
@@ -204,20 +257,35 @@ function resizeCanvas() {
 window.addEventListener("resize", resizeCanvas);
 
 canvas.addEventListener('mousemove', (e) => {
-  MOUSE.x = e.offsetX;
-  MOUSE.y = e.offsetY;
+  mouse.x = e.offsetX;
+  mouse.y = e.offsetY;
+
+  mouse.pointerX = mouse.x + mouse.offsetX;
+  mouse.pointerY = mouse.y + mouse.offsetY;
+
+  if(mouse.isCollision(mouse.pointerX, mouse.pointerY, gridStartX, gridStartY, grid.canvas.width, grid.canvas.height)) {
+    mouse.isPointerInGrid = true;
+  } else {
+    mouse.isPointerInGrid = false;
+  }
+
+  if(mouse.isCollision(mouse.x, mouse.y, spawnerStartX, spawnerStartY, spawner.canvas.width, spawner.canvas.height)) {
+    mouse.isInSpawner = true;
+  } else {
+    mouse.isInSpawner = false;
+  }
 });
 canvas.addEventListener('mousedown', () => {
-  MOUSE.isClick = true;
+  //mouse.isClick = true;
+
+  if(mouse.isInSpawner) {
+    mouse.isGrabbed = true;
+    mouse.grabbedBlockIdx = Math.floor((mouse.x - spawnerStartX) / spawner.canvas.width * spawner.blockList.length);
+  }
 });
 canvas.addEventListener('mouseup', () => {
-  MOUSE.isClick = false;
-});
-grid.canvas.addEventListener('mouseenter', () => {
-  MOUSE.isInGrid = true;
-});
-grid.canvas.addEventListener('mouseleave', () => {
-  MOUSE.isInGrid = false;
+  //mouse.isClick = false;
+  mouse.isGrabbed = false;
 });
 
 
