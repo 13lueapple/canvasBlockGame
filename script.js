@@ -6,9 +6,8 @@ const canvas = document.getElementById("main");
 const ctx = canvas.getContext("2d");
 
 class Cell {
-  constructor(color, opacity = 1) {
+  constructor(color) {
     this.color = color;
-    this.opacity = opacity;
 
     this.canvas = document.createElement('canvas');
     this.canvas.width = CELLSIZE;
@@ -22,20 +21,19 @@ class Cell {
 
   /** @param {CanvasRenderingContext2D} ctx*/ 
   render(ctx, x, y) {
-    ctx.globalAlpha = this.opacity;
     ctx.drawImage(this.canvas, x, y);
-    ctx.globalAlpha = 1;
   }
 }
 
 class Block {
-  constructor(shape, color, opacity = 1) {
+  constructor(shape, color) {
     this.canvas = document.createElement('canvas');
     this.ctx = this.canvas.getContext('2d');
     this.shape = shape;
     this.color = color;
-    this.opacity = opacity;
-    this.cell = new Cell(this.color, this.opacity);
+
+    /**@type {Cell}*/
+    this.cell = cellCache[this.color];
 
     this.canvas.width = 5 * CELLSIZE;
     this.canvas.height = 5 * CELLSIZE;
@@ -50,6 +48,8 @@ class Block {
     ctx.drawImage(this.canvas, x, y, w, h);
   }
 }
+
+
 
 class Grid {
   constructor(color, lineWidth, numberX, numberY) {
@@ -82,6 +82,47 @@ class Grid {
     this.ctx.stroke();
   }
   
+  checkLines() {
+    let rowsToDelete = [];
+    let colsToDelete = [];
+
+    // 1. 가로줄 검사
+    for (let y = 0; y < this.numberY; y++) {
+      if (this.array[y].every(cell => cell !== undefined)) {
+        rowsToDelete.push(y);
+      }
+    }
+
+    // 2. 세로줄 검사
+    for (let x = 0; x < this.numberX; x++) {
+      let isColFull = true;
+      for (let y = 0; y < this.numberY; y++) {
+        if (this.array[y][x] === undefined) {
+          isColFull = false;
+          break; // 한 칸이라도 비었으면 이 열은 탈락
+        }
+      }
+      if (isColFull) colsToDelete.push(x);
+    }
+
+    // 3. 실제 삭제 (데이터 비우기)
+    // 가로줄 비우기
+    rowsToDelete.forEach(y => {
+      for (let x = 0; x < this.numberX; x++) {
+        this.array[y][x] = undefined;
+      }
+    });
+
+    // 세로줄 비우기
+    colsToDelete.forEach(x => {
+      for (let y = 0; y < this.numberY; y++) {
+        this.array[y][x] = undefined;
+      }
+    });
+
+    // 터진 줄 수를 반환 (나중에 점수 계산용)
+    return rowsToDelete.length + colsToDelete.length;
+  }
   
   /** @param {CanvasRenderingContext2D} ctx*/ 
   render(ctx, x, y) {
@@ -96,28 +137,13 @@ class Spawner {
     this.color = color;
     this.lineWidth = lineWidth;
 
-    this.respawn()
-
     this.canvas.width = width;
     this.canvas.height = height;
 
-    this.ctx.strokeStyle = this.color;
-    this.ctx.lineWidth = this.lineWidth;
 
-    this.ctx.strokeRect(0, 0, this.canvas.width, this.canvas.height);
+    this.respawn();
 
-   for(let i = 0; i < this.blockList.length; i++) {
-     const blockSizeRatio = 0.5;
-     this.ctx.drawImage(
-       this.blockList[i].canvas,
-       i * this.canvas.width / this.blockList.length + this.canvas.width / this.blockList.length / 2 - this.blockList[i].canvas.width * blockSizeRatio / 2,
-       this.canvas.height / 2 - this.blockList[i].canvas.height * blockSizeRatio / 2,
-       this.blockList[i].canvas.width * blockSizeRatio,
-       this.blockList[i].canvas.height * blockSizeRatio
-     );
-   }
   }
-
   /** @param {CanvasRenderingContext2D} ctx*/ 
   render(ctx, x, y) {
     ctx.drawImage(this.canvas, x, y);
@@ -130,6 +156,26 @@ class Spawner {
         SHAPES[Math.floor(Math.random() * SHAPES.length)], COLORS[Math.floor(Math.random() * COLORS.length)]
       )
     });
+
+    this.draw();
+  }
+
+  draw() {
+    this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    this.ctx.strokeStyle = this.color;
+    this.ctx.lineWidth = this.lineWidth;
+    this.ctx.strokeRect(0, 0, this.canvas.width, this.canvas.height);
+
+    for(let i = 0; i < this.blockList.length; i++) {
+      const blockSizeRatio = 0.5;
+      this.ctx.drawImage(
+        this.blockList[i].canvas,
+        i * this.canvas.width / this.blockList.length + this.canvas.width / this.blockList.length / 2 - this.blockList[i].canvas.width * blockSizeRatio / 2,
+        this.canvas.height / 2 - this.blockList[i].canvas.height * blockSizeRatio / 2,
+        this.blockList[i].canvas.width * blockSizeRatio,
+        this.blockList[i].canvas.height * blockSizeRatio
+      );
+    }
   }
 }
 
@@ -152,23 +198,22 @@ class Mouse {
     this.offsetX = offsetX;
     this.offsetY = offsetY;
 
-    this.canvas = document.createElement('canvas');
-    this.ctx = this.canvas.getContext('2d')
-    this.canvas.width = 5 * CELLSIZE;
-    this.canvas.height = 5 * CELLSIZE
-    this.ctx.strokeStyle = 'grey';
-    this.ctx.lineWidth = 2
-    this.ctx.strokeRect(0, 0, this.canvas.width, this.canvas.height)
-
     this.grabbedBlockIdx = undefined;
     this.isGrabbed = false;
+    this.canPlace = false;
   }
 
   isCollision(cx, cy, x, y, w, h) {
     return cx > x && cx < x + w && cy > y && cy < y + h;
   }
-  render(ctx, x, y) {
-    ctx.drawImage(this.canvas, x, y)
+
+  /**@param {CanvasRenderingContext2D} ctx*/
+  renderPointer(ctx, x, y) {
+    ctx.strokeStyle = 'grey';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(x, y, 5, 0, Math.PI * 2);
+    ctx.stroke();
   }
 }
 
@@ -189,21 +234,33 @@ function render() {
   spawnerStartY = gridStartY + grid.canvas.height + 20;
   spawner.render(ctx, spawnerStartX, spawnerStartY)
 
+
+  if(mouse.isPointerInGrid && mouse.isGrabbed && mouse.canPlace) {
+    for(const pos of spawner.blockList[mouse.grabbedBlockIdx].shape) {
+      const tx = gridStartX + (mouse.gridPosX + pos.x) * CELLSIZE;
+      const ty = gridStartY + (mouse.gridPosY + pos.y) * CELLSIZE;
+      ctx.globalAlpha = 0.5;
+      cellCache[spawner.blockList[mouse.grabbedBlockIdx].color].render(ctx, tx, ty);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  //draw grid cells
+  for(let y = 0; y < grid.array.length; y++) {
+    for(let x = 0; x < grid.array[y].length; x++) {
+      if(grid.array[y][x]) {
+        cellCache[grid.array[y][x]].render(ctx, gridStartX + x * CELLSIZE, gridStartY + y * CELLSIZE);
+      }
+    }
+  }
+
   //draw mouse canvas
   if(mouse.isGrabbed) {
     spawner.blockList[mouse.grabbedBlockIdx].render(
       ctx, mouse.pointerX - spawner.blockList[mouse.grabbedBlockIdx].canvas.width / 2,
       mouse.pointerY - spawner.blockList[mouse.grabbedBlockIdx].canvas.height / 2);
-    //mouse.render(ctx, mouse.x + mouse.offsetX - mouse.canvas.width / 2, mouse.y + mouse.offsetY - mouse.canvas.height / 2)
   }
-  
-  ctx.strokeStyle = 'grey';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.arc(mouse.pointerX, mouse.pointerY, 5, 0, Math.PI * 2);
-  ctx.stroke();
-
-  //draw grid cells
+  mouse.renderPointer(ctx, mouse.pointerX, mouse.pointerY);
 }
 
 
@@ -216,11 +273,27 @@ function update(interval) {
     mouse.gridPosX = Math.floor((mouse.pointerX - gridStartX) / CELLSIZE);
     mouse.gridPosY = Math.floor((mouse.pointerY - gridStartY) / CELLSIZE);
     if(mouse.isGrabbed){
-      for(let pos of spawner.blockList[mouse.grabbedBlockIdx].shape){
-      }
-    } 
+      mouse.canPlace = spawner.blockList[mouse.grabbedBlockIdx].shape.every((pos) => {
+        const tx = mouse.gridPosX + pos.x;
+        const ty = mouse.gridPosY + pos.y;
+
+        return tx >= 0 && tx < grid.numberX && ty >= 0 && ty < grid.numberY && !grid.array[ty][tx];
+      })
+    } else {
+      mouse.canPlace = false;
+    }
   }
-  console.log(mouse.gridPosX, mouse.gridPosY);
+
+  if(spawner.blockList.length == 0) {spawner.respawn()}
+
+  // 가로축 검사
+  for(let y = 0; y < grid.numberY; y++) {
+    if(grid.array[y].every((item) => {item !== undefined})) {
+      grid.array[y].push()
+    }
+  }
+
+  console.log(spawner.blockList);
 }
   
 
@@ -230,14 +303,15 @@ function update(interval) {
 let firstTime = 0;
 let gridStartX, gridStartY, spawnerStartX, spawnerStartY;
 
-const grid = new Grid('grey', 2, 10, 10);
-const spawner = new Spawner('grey', 6, grid.canvas.width, 200);
-const mouse = new Mouse(-100, -150);
-
 const cellCache = {};
 COLORS.forEach((color) => {
   cellCache[color] = new Cell(color);
 })
+
+const grid = new Grid('grey', 2, 10, 10);
+const spawner = new Spawner('grey', 6, grid.canvas.width, 200);
+const mouse = new Mouse(-100, -150);
+
 
 function main(timeStamp) {
   const interval = (timeStamp - firstTime) / 1000;
@@ -285,7 +359,18 @@ canvas.addEventListener('mousedown', () => {
 });
 canvas.addEventListener('mouseup', () => {
   //mouse.isClick = false;
+  if(mouse.canPlace) {
+    for(const pos of spawner.blockList[mouse.grabbedBlockIdx].shape) {
+      grid.array[mouse.gridPosY + pos.y][mouse.gridPosX + pos.x] = spawner.blockList[mouse.grabbedBlockIdx].color;
+    }
+    spawner.blockList.splice(mouse.grabbedBlockIdx, 1);
+    spawner.draw();
+    grid.checkLines();
+  }
+
   mouse.isGrabbed = false;
+  mouse.grabbedBlockIdx = undefined;
+
 });
 
 
